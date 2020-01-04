@@ -83,6 +83,7 @@ wsServer.on('request', function (request) {
                                                 connection.isServer = true;
                                                 connection.isRegistered = true;
                                                 connection.serverId = payload["serverId"];
+                                                connection.clients = [];
 
                                                 servers[connection.serverId] = connection;
                                                 console.log("Registered server with ID " + connection.serverId);
@@ -95,6 +96,7 @@ wsServer.on('request', function (request) {
                                                 connection.isClient = true;
                                                 connection.isRegistered = true;
                                                 connection.clientId = payload["clientId"];
+                                                connection.server = null;
 
                                                 clients[connection.clientId] = connection;
                                                 console.log("Registered client with ID " + connection.clientId);
@@ -127,6 +129,10 @@ wsServer.on('request', function (request) {
                                                 connection.close(1000);
                                             }else{
                                                 targetConnection = clients[target];
+                                                if (connection.clients.indexOf(target) === -1) {
+                                                    connection.clients.push(target);
+                                                   connection.send(JSON.stringify({_state:"CONNECT",which:target}));
+                                                }
                                             }
                                         }else if (connection.isClient) {
                                             if (!clients[source]) {
@@ -137,6 +143,10 @@ wsServer.on('request', function (request) {
                                                 connection.close(1000);
                                             }else{
                                                 targetConnection = servers[target];
+                                                if (!connection.server) {
+                                                    connection.server = target;
+                                                    connection.send(JSON.stringify({_state:"CONNECT",which:target}));
+                                                }
                                             }
                                         }
                                         if (!targetConnection) {
@@ -164,10 +174,35 @@ wsServer.on('request', function (request) {
         if (connection.isClient&&connection.clientId) {
             delete clients[connection.clientId];
             connection.isClient = false;
+
+            if (connection.server) {
+                let s = servers[connection.server];
+                if (s) {
+                    let i = s.clients.indexOf(connection.clientId);
+                    if (i !== -1) {
+                        s.clients.splice(i, 1);
+                    }
+                    s.send(JSON.stringify({_state:"DISCONNECT",which:connection.clientId}));
+                }
+                connection.server=null;
+            }
         }
         if (connection.isServer && connection.serverId) {
             delete servers[connection.serverId];
             connection.isServer = false;
+
+            if (connection.clients) {
+                for (let i = 0; i < connection.clients.length; i++) {
+                    let c = clients[connection.clients[i]];
+                    if (c) {
+                        if (c.server === connection.serverId) {
+                            c.server=null;
+                            c.send(JSON.stringify({_state:"DISCONNECT",which:connection.serverId}));
+                        }
+                    }
+                }
+                connection.clients = [];
+            }
         }
         console.log((new Date()) + ' Peer ' + connection.remoteAddress + ' disconnected.');
         printInfo();
